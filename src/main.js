@@ -67,6 +67,9 @@ let recipeIndex = 0;
 let filteredItems = [];
 let searchQuery = '';
 
+/** @type {Map<string, { url: string, flat: boolean }>} */
+const textureUrlCache = new Map();
+
 const tooltipEl = document.createElement('div');
 tooltipEl.className = 'mc-tooltip';
 tooltipEl.hidden = true;
@@ -116,6 +119,15 @@ function isGalleryImageUrl(url) {
  * @param {string} name id предмета (snake_case)
  */
 function bindTexture(img, name) {
+  const cached = textureUrlCache.get(name);
+  if (cached) {
+    img.onerror = null;
+    img.onload = null;
+    img.classList.toggle('mc-icon--flat', cached.flat);
+    img.src = cached.url;
+    return;
+  }
+
   const urls = [...galleryImageCandidates(name), ...textureCandidates(name)];
   let i = 0;
   const tryNext = () => {
@@ -130,7 +142,9 @@ function bindTexture(img, name) {
     img.onerror = tryNext;
     img.onload = () => {
       img.onerror = null;
-      img.classList.toggle('mc-icon--flat', !isGalleryImageUrl(String(img.src)));
+      const flat = !isGalleryImageUrl(String(img.src));
+      img.classList.toggle('mc-icon--flat', flat);
+      textureUrlCache.set(name, { url: img.src, flat });
     };
     img.src = url;
   };
@@ -262,47 +276,52 @@ function renderSlots(grid, rootEl) {
   }
 }
 
-function render() {
-  const loadEl = document.querySelector('[data-load-status]');
+function updateResultsActiveState() {
   const resultsEl = document.querySelector('[data-results]');
-  const craftEl = document.querySelector('[data-craft]');
+  if (!resultsEl) return;
+  for (const btn of resultsEl.querySelectorAll('.result-item')) {
+    btn.classList.toggle('active', Number(btn.dataset.id) === selectedId);
+  }
+}
+
+function renderResults() {
+  const resultsEl = document.querySelector('[data-results]');
+  if (!resultsEl) return;
+
+  resultsEl.replaceChildren();
+  for (const it of filteredItems) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.id = String(it.id);
+    btn.className = 'result-item' + (selectedId === it.id ? ' active' : '');
+    const img = document.createElement('img');
+    img.className = 'ico';
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    bindTexture(img, it.name);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.innerHTML = `<span class="dn">${esc(it.displayName)}</span><span class="idn">${esc(it.name)}</span>`;
+    btn.append(img, meta);
+    btn.addEventListener('click', () => {
+      selectedId = it.id;
+      recipeIndex = 0;
+      render(false);
+    });
+    resultsEl.appendChild(btn);
+  }
+  if (!filteredItems.length && items.length) {
+    const p = document.createElement('p');
+    p.className = 'empty-craft';
+    p.textContent = 'Ничего не найдено. Попробуйте другой запрос.';
+    resultsEl.appendChild(p);
+  }
+}
+
+function renderCraftHeader() {
   const navEl = document.querySelector('[data-recipe-nav]');
   const titleEl = document.querySelector('[data-selected-title]');
-
-  if (loadEl && !items.length && loadEl.dataset.ready !== '1') {
-    loadEl.textContent = 'Загрузка предметов и рецептов…';
-  }
-
-  if (resultsEl) {
-    resultsEl.replaceChildren();
-    for (const it of filteredItems) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'result-item' + (selectedId === it.id ? ' active' : '');
-      const img = document.createElement('img');
-      img.className = 'ico';
-      img.alt = '';
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      bindTexture(img, it.name);
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.innerHTML = `<span class="dn">${esc(it.displayName)}</span><span class="idn">${esc(it.name)}</span>`;
-      btn.append(img, meta);
-      btn.addEventListener('click', () => {
-        selectedId = it.id;
-        recipeIndex = 0;
-        render();
-      });
-      resultsEl.appendChild(btn);
-    }
-    if (!filteredItems.length && items.length) {
-      const p = document.createElement('p');
-      p.className = 'empty-craft';
-      p.textContent = 'Ничего не найдено. Попробуйте другой запрос.';
-      resultsEl.appendChild(p);
-    }
-  }
 
   if (titleEl) {
     if (selectedId != null) {
@@ -312,6 +331,35 @@ function render() {
       titleEl.textContent = 'Выберите предмет слева';
     }
   }
+
+  if (!navEl || selectedId == null) return;
+
+  const list = getRecipeList(selectedId);
+  navEl.hidden = list.length < 2;
+  const prev = navEl.querySelector('[data-prev]');
+  const next = navEl.querySelector('[data-next]');
+  const label = navEl.querySelector('[data-rcount]');
+  if (prev && next && label) {
+    prev.disabled = recipeIndex <= 0;
+    next.disabled = recipeIndex >= list.length - 1;
+    label.textContent = `${recipeIndex + 1} / ${list.length}`;
+  }
+}
+
+/** @param {boolean} rebuildResults пересобрать список поиска (false — только подсветка выбранного) */
+function render(rebuildResults = true) {
+  const loadEl = document.querySelector('[data-load-status]');
+  const craftEl = document.querySelector('[data-craft]');
+  const navEl = document.querySelector('[data-recipe-nav]');
+
+  if (loadEl && !items.length && loadEl.dataset.ready !== '1') {
+    loadEl.textContent = 'Загрузка предметов и рецептов…';
+  }
+
+  if (rebuildResults) renderResults();
+  else updateResultsActiveState();
+
+  renderCraftHeader();
 
   if (!craftEl) return;
 
@@ -338,18 +386,6 @@ function render() {
     craftEl.appendChild(empty);
     if (navEl) navEl.hidden = true;
     return;
-  }
-
-  if (navEl) {
-    navEl.hidden = list.length < 2;
-    const prev = navEl.querySelector('[data-prev]');
-    const next = navEl.querySelector('[data-next]');
-    const label = navEl.querySelector('[data-rcount]');
-    if (prev && next && label) {
-      prev.disabled = recipeIndex <= 0;
-      next.disabled = recipeIndex >= list.length - 1;
-      label.textContent = `${recipeIndex + 1} / ${list.length}`;
-    }
   }
 
   const recipe = list[recipeIndex];
@@ -523,14 +559,14 @@ function initShell() {
   nav.querySelector('[data-prev]').addEventListener('click', () => {
     if (recipeIndex > 0) {
       recipeIndex -= 1;
-      render();
+      render(false);
     }
   });
   nav.querySelector('[data-next]').addEventListener('click', () => {
     const list = getRecipeList(selectedId);
     if (recipeIndex < list.length - 1) {
       recipeIndex += 1;
-      render();
+      render(false);
     }
   });
 }
