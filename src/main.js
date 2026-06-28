@@ -75,14 +75,6 @@ tooltipEl.className = 'mc-tooltip';
 tooltipEl.hidden = true;
 document.body.appendChild(tooltipEl);
 
-function esc(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 function textureCandidates(name) {
   /** Часть моделей ссылается на *_top / *_front и т.д.; узкий fallback без угадывания рецептов */
   const variants = new Set([name]);
@@ -223,7 +215,7 @@ function filterItems(q) {
   const qq = q.trim().toLowerCase();
   const base = items;
   if (!qq) {
-    return base.sort((a, b) => a.displayName.localeCompare(b.displayName)).slice(0, 220);
+    return base.sort((a, b) => a.displayName.localeCompare(b.displayName));
   }
   const scored = [];
   for (const it of base) {
@@ -238,7 +230,7 @@ function filterItems(q) {
     }
   }
   scored.sort((a, b) => b.score - a.score);
-  return scored.map((s) => s.it).slice(0, 600);
+  return scored.map((s) => s.it);
 }
 
 function getRecipeList(itemId) {
@@ -279,41 +271,50 @@ function renderSlots(grid, rootEl) {
 function updateResultsActiveState() {
   const resultsEl = document.querySelector('[data-results]');
   if (!resultsEl) return;
-  for (const btn of resultsEl.querySelectorAll('.result-item')) {
+  for (const btn of resultsEl.querySelectorAll('.catalog-item')) {
     btn.classList.toggle('active', Number(btn.dataset.id) === selectedId);
   }
 }
 
 function renderResults() {
   const resultsEl = document.querySelector('[data-results]');
+  const countEl = document.querySelector('[data-results-count]');
   if (!resultsEl) return;
+
+  if (countEl) {
+    countEl.textContent = searchQuery.trim()
+      ? `Найдено: ${filteredItems.length}`
+      : `Всего: ${filteredItems.length}`;
+  }
 
   resultsEl.replaceChildren();
   for (const it of filteredItems) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.dataset.id = String(it.id);
-    btn.className = 'result-item' + (selectedId === it.id ? ' active' : '');
+    btn.className = 'catalog-item' + (selectedId === it.id ? ' active' : '');
+    btn.title = `${it.displayName} (${it.name})`;
     const img = document.createElement('img');
     img.className = 'ico';
-    img.alt = '';
+    img.alt = it.displayName;
     img.loading = 'lazy';
     img.decoding = 'async';
     bindTexture(img, it.name);
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.innerHTML = `<span class="dn">${esc(it.displayName)}</span><span class="idn">${esc(it.name)}</span>`;
-    btn.append(img, meta);
+    btn.appendChild(img);
     btn.addEventListener('click', () => {
       selectedId = it.id;
       recipeIndex = 0;
       render(false);
     });
+    btn.addEventListener('mousemove', (e) => {
+      showTooltip(it.displayName, e.clientX, e.clientY, it.displayName);
+    });
+    btn.addEventListener('mouseleave', hideTooltip);
     resultsEl.appendChild(btn);
   }
   if (!filteredItems.length && items.length) {
     const p = document.createElement('p');
-    p.className = 'empty-craft';
+    p.className = 'empty-catalog';
     p.textContent = 'Ничего не найдено. Попробуйте другой запрос.';
     resultsEl.appendChild(p);
   }
@@ -328,7 +329,7 @@ function renderCraftHeader() {
       const it = idToItem.get(selectedId);
       titleEl.textContent = it ? it.displayName : '';
     } else {
-      titleEl.textContent = 'Выберите предмет слева';
+      titleEl.textContent = 'Выберите предмет внизу';
     }
   }
 
@@ -369,7 +370,7 @@ function render(rebuildResults = true) {
     const empty = document.createElement('div');
     empty.className = 'empty-craft';
     empty.textContent =
-      'Выберите предмет в списке, чтобы увидеть рецепт крафта на верстаке (данные Java Edition ' +
+      'Выберите предмет в каталоге внизу, чтобы увидеть рецепт крафта на верстаке (данные Java Edition ' +
       MC_DATA_VER +
       ').';
     craftEl.appendChild(empty);
@@ -515,29 +516,29 @@ function initShell() {
           <h1>Крафты</h1>
           <span>Minecraft Java ${MC_DATA_VER}</span>
         </div>
+        <div class="search-wrap">
+          <input id="q" class="search-input" type="search" autocomplete="off" placeholder="Поиск: diamond, pickaxe, oak_planks…" aria-label="Поиск предметов" />
+        </div>
         <div class="load-line" data-load-status>Загрузка…</div>
       </header>
-      <div class="main-grid">
-        <section class="panel">
-          <div class="panel-head">Поиск</div>
-          <div class="search-wrap">
-            <label for="q">Имя или отображаемое имя (англ.)</label>
-            <input id="q" class="search-input" type="search" autocomplete="off" placeholder="diamond, pickaxe, oak_planks…" />
-            <p class="search-hint">В списке только предметы с крафтом на верстаке. Пустой поиск — начало каталога по алфавиту.</p>
-          </div>
-          <div class="results" data-results></div>
-        </section>
-        <section class="panel craft-zone">
-          <div class="panel-head">Верстак 3×3</div>
-          <div class="selected-title" data-selected-title></div>
-          <div class="recipe-nav" data-recipe-nav hidden>
-            <button type="button" data-prev>◀ Рецепт</button>
-            <span class="count" data-rcount>1 / 1</span>
-            <button type="button" data-next>Рецепт ▶</button>
-          </div>
-          <div data-craft style="flex:1;min-height:0;display:flex;flex-direction:column;"></div>
-        </section>
-      </div>
+
+      <main class="stage">
+        <div class="selected-title" data-selected-title>Выберите предмет внизу</div>
+        <div class="recipe-nav" data-recipe-nav hidden>
+          <button type="button" data-prev>◀ Рецепт</button>
+          <span class="count" data-rcount>1 / 1</span>
+          <button type="button" data-next>Рецепт ▶</button>
+        </div>
+        <div class="craft-stage" data-craft></div>
+      </main>
+
+      <footer class="catalog-dock">
+        <div class="catalog-head">
+          <span class="catalog-title">Все крафты</span>
+          <span class="catalog-count" data-results-count></span>
+        </div>
+        <div class="catalog-grid" data-results></div>
+      </footer>
     </div>
   `;
 
